@@ -1,7 +1,7 @@
 require("dotenv").config();
 
 module.exports = {
-  baseURL: process.env.SILKPAY_BASE_URL || "https://api.dev.silkpay.ai",
+  baseURL: process.env.SILKPAY_BASE_URL || "https://api.silkpay.ai",
   merchantId: process.env.SILKPAY_MERCHANT_ID,
   secretKey: process.env.SILKPAY_SECRET_KEY,
   publicKey: process.env.SILKPAY_PUBLIC_KEY,

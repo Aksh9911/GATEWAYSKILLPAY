@@ -59,9 +59,8 @@ const createPayment = async (paymentData) => {
       notifyUrl: paymentData.callbackUrl || paymentData.notifyUrl,
     };
 
-    // Generate sign according to SilkPay format
-    // Sign = MD5 or specific hash of sorted params + secretKey
-    const signString = `amount=${payload.amount}&mId=${payload.mId}&mOrderId=${payload.mOrderId}&notifyUrl=${payload.notifyUrl}&timestamp=${payload.timestamp}&key=${config.secretKey}`;
+    // Generate sign: md5(mId + mOrderId + amount + timestamp + secret)
+    const signString = `${payload.mId}${payload.mOrderId}${payload.amount}${payload.timestamp}${config.secretKey}`;
     payload.sign = crypto.createHash("md5").update(signString).digest("hex");
 
     const url = `${config.baseURL}${config.createEndpoint}`;
