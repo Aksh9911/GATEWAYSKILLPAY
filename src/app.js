@@ -6,6 +6,7 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 
 const paymentRoutes = require("./routes/payment.routes");
+const { webhookHandler } = require("./controllers/payment.controller");
 
 const app = express();
 
@@ -26,7 +27,11 @@ app.use(morgan("combined"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// API routes
+// SilkPay Webhook endpoint (must be at exact URL used in notifyUrl)
+// This route is registered separately to ensure it's at /api/payment/webhook
+app.post("/api/payment/webhook", webhookHandler);
+
+// API routes (all other payment endpoints)
 app.use("/api/payments", paymentRoutes);
 
 // Health check endpoint
@@ -49,7 +54,7 @@ app.get("/", (req, res) => {
       submitUtr: "POST /api/payments/submit-utr",
       queryUtr: "POST /api/payments/query-utr",
       verifyPayment: "GET /api/payments/verify/:paymentId",
-      webhook: "POST /api/payments/webhook",
+      webhook: "POST /api/payment/webhook",
       health: "GET /health",
     },
     silkpayEndpoints: {

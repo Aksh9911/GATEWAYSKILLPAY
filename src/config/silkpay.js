@@ -13,4 +13,6 @@ module.exports = {
   submitUtrEndpoint: process.env.SILKPAY_SUBMIT_UTR_ENDPOINT || "/transaction/payin/submit/utr",
   queryUtrEndpoint: process.env.SILKPAY_QUERY_UTR_ENDPOINT || "/transaction/payin/query/utr",
   callbackEndpoint: process.env.SILKPAY_CALLBACK_ENDPOINT || "/callback",
+  // Notify URL for SilkPay callbacks
+  notifyUrl: process.env.NOTIFY_URL || "https://skillpay.rollix777.com/api/payment/webhook",
 };

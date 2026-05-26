@@ -56,7 +56,7 @@ const createPayment = async (paymentData) => {
       mOrderId: paymentData.orderId || paymentData.mOrderId,
       amount: String(paymentData.amount),
       timestamp: timestamp,
-      notifyUrl: paymentData.callbackUrl || paymentData.notifyUrl,
+      notifyUrl: paymentData.callbackUrl || paymentData.notifyUrl || config.notifyUrl,
     };
 
     // Generate sign: md5(mId + mOrderId + amount + timestamp + secret)
@@ -103,7 +103,7 @@ const createUserOrder = async (amount) => {
     const mOrderId = `SKILL_${dateStr}_${timeStr}_${orderNum}`;
     orderCounter++; // Increment for next order
 
-    const notifyUrl = "http://localhost/silkpay";
+    const notifyUrl = config.notifyUrl;
 
     // Build payload
     const payload = {

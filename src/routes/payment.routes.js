@@ -11,6 +11,9 @@ const {
   webhookHandler,
 } = require("../controllers/payment.controller");
 
+// NOTE: Webhook endpoint is registered at app.js level as /api/payment/webhook
+// This route at /webhook is mounted at /api/payments in app.js
+
 // User-facing endpoint (accepts amount only)
 router.post("/user/order", createUserOrderHandler);       // For user app - auto-generates order params
 
@@ -21,7 +24,8 @@ router.post("/submit-utr", submitUtrHandler);              // POST /transaction/
 router.post("/query-utr", queryUtrHandler);                 // POST /transaction/payin/query/utr
 router.get("/verify/:paymentId", verifyPaymentHandler);   // GET (uses query endpoint internally)
 
-// Webhook route (no auth required)
-router.post("/webhook", webhookHandler);                    // POST /callback
+// Webhook route for SilkPay callbacks (no auth required)
+// SilkPay will send SUCCESS payment notifications to this endpoint
+router.post("/webhook", webhookHandler);                    // POST /api/payments/webhook
 
 module.exports = router;
