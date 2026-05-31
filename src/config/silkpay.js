@@ -5,7 +5,7 @@ module.exports = {
   merchantId: process.env.SILKPAY_MERCHANT_ID,
   secretKey: process.env.SILKPAY_SECRET_KEY,
   publicKey: process.env.SILKPAY_PUBLIC_KEY,
-  privateKey: process.env.SILKPAY_PRIVATE_KEY,
+  privateKey: process.env.SILKPAY_PRIVATE_KEY,  
   webhookSecret: process.env.WEBHOOK_SECRET,
   // API Endpoints (SilkPay actual endpoints)
   createEndpoint: process.env.SILKPAY_CREATE_ENDPOINT || "/transaction/payin/v2",

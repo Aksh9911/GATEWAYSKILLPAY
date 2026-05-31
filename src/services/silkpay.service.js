@@ -1,6 +1,7 @@
 const axios = require("axios");
 const crypto = require("crypto");
 const config = require("../config/silkpay");
+const db = require("../config/database");
 
 /**
  * Generate authentication signature for SilkPay API
@@ -157,24 +158,48 @@ const verifyPayment = async (paymentId) => {
 };
 
 /**
- * Get payment status
- * @param {string} paymentId - Payment ID
+ * Get payment status (SilkPay query endpoint)
+ * Endpoint: POST /transaction/payin/query
+ * Payload: { mId, mOrderId, timestamp, sign }
+ * Sign: md5(mId + mOrderId + timestamp + key) - 32-bit lowercase
+ * Timestamp is fetched from recharge table based on mOrderId
+ * @param {string} paymentId - Payment ID (optional)
+ * @param {string} merchantOrderId - Merchant order ID (required)
  * @returns {Promise<Object>} - Payment status response
  */
 const getPaymentStatus = async (paymentId, merchantOrderId) => {
   try {
-    const timestamp = Date.now();
+    const mOrderId = merchantOrderId || paymentId;
 
+    if (!mOrderId) {
+      throw new Error("Missing required parameter: merchantOrderId or paymentId");
+    }
+
+    // Fetch timestamp from recharge table using mOrderId (which equals order_id)
+    const [rows] = await db.execute(
+      "SELECT date, time FROM recharge WHERE order_id = ? LIMIT 1",
+      [mOrderId]
+    );
+
+    let timestamp;
+    if (rows.length > 0 && rows[0].date && rows[0].time) {
+      // Combine date and time from database and convert to timestamp
+      const dateTimeStr = `${rows[0].date} ${rows[0].time}`;
+      timestamp = new Date(dateTimeStr).getTime();
+    } else {
+      // Fallback to current timestamp if not found in database
+      timestamp = Date.now();
+    }
+
+    // Build payload in exact SilkPay format
     const payload = {
       mId: config.merchantId,
+      mOrderId: mOrderId,
       timestamp: timestamp,
-      ...(paymentId && { orderId: paymentId }),
-      ...(merchantOrderId && { mOrderId: merchantOrderId }),
     };
 
-    // Generate sign
-    const params = Object.keys(payload).sort().map(key => `${key}=${payload[key]}`).join("&");
-    const signString = `${params}&key=${config.secretKey}`;
+    // Generate sign: md5(mId + mOrderId + timestamp + key) - exact order, 32-bit lowercase
+    const signString = `${payload.mId}${payload.mOrderId}${payload.timestamp}${config.secretKey}`;
     payload.sign = crypto.createHash("md5").update(signString).digest("hex");
 
     const response = await axios.post(
