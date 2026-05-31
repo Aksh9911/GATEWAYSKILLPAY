@@ -121,9 +121,12 @@ const createUserOrder = async (amount) => {
 
     const url = `${config.baseURL}${config.createEndpoint}`;
 
+    console.log("[createUserOrder] Calling SilkPay:", url);
+    console.log("[createUserOrder] Payload mId:", payload.mId, "mOrderId:", payload.mOrderId);
+
     const response = await axios.post(url, payload, {
       headers: { "Content-Type": "application/json" },
-      timeout: 10000
+      timeout: 30000 // Increased to 30 seconds
     });
 
     return {
@@ -136,6 +139,10 @@ const createUserOrder = async (amount) => {
       }
     };
   } catch (error) {
+    console.error("[createUserOrder] SilkPay Error:", error.message);
+    if (error.response) {
+      console.error("[createUserOrder] SilkPay Response:", error.response.data);
+    }
     const errorMessage = error.response?.data?.message
       || error.response?.data?.error
       || error.message
