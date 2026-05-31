@@ -1,5 +1,7 @@
 const silkpayService = require("../services/silkpay.service");
 const db = require("../config/database");
+const crypto = require("crypto");
+const config = require("../config/silkpay");
 
 /**
  * Create a new payment (SilkPay format)
@@ -265,6 +267,7 @@ const webhookHandler = async (req, res) => {
       amount,      // Payment amount
       status,      // Should be "SUCCESS" for successful payments
       sign,        // Signature for verification
+      timestamp,   // Callback timestamp (needed for sign verification)
     } = req.body;
 
     // Log extracted fields
@@ -274,38 +277,57 @@ const webhookHandler = async (req, res) => {
       amount,
       status,
       sign,
+      timestamp,
     });
 
-    // TODO: Verify signature before processing
-    // SilkPay sign format: md5(mId + mOrderId + amount + timestamp + secret)
-    // const expectedSign = crypto.createHash("md5").update(mId + mOrderId + amount + timestamp + secretKey).digest("hex");
-    // if (sign !== expectedSign) {
-    //   console.error("[SilkPay Webhook] Invalid signature");
-    //   return res.status(200).send("OK"); // Still return OK to stop retries, but don't process
-    // }
+    // Validate required fields
+    if (!mOrderId || !tradeNo || !amount || !sign) {
+      console.error("[SilkPay Webhook] Missing required fields");
+      return res.status(200).send("OK");
+    }
+
+    // Verify signature: md5(mId + mOrderId + amount + timestamp + secretKey)
+    const expectedSign = crypto
+      .createHash("md5")
+      .update(`${config.merchantId}${mOrderId}${amount}${timestamp}${config.secretKey}`)
+      .digest("hex");
+
+    if (sign !== expectedSign) {
+      console.error("[SilkPay Webhook] Invalid signature");
+      console.error("[SilkPay Webhook] Expected:", expectedSign);
+      console.error("[SilkPay Webhook] Received:", sign);
+      return res.status(200).send("OK"); // Still return OK to stop retries, but don't process
+    }
+
+    console.log("[SilkPay Webhook] Signature verified successfully");
 
     // SilkPay only sends callbacks for SUCCESS payments
     // But we check status anyway for safety
     if (status === "SUCCESS" || status === "success") {
       console.log("[SilkPay Webhook] Payment SUCCESS confirmed for order:", mOrderId, "Trade:", tradeNo);
 
-      // TODO: Implement duplicate callback protection
-      // Check if this mOrderId has already been processed (isDepAdded = 1)
-      // const [existing] = await db.execute("SELECT isDepAdded FROM recharge WHERE order_id = ?", [mOrderId]);
-      // if (existing.length > 0 && existing[0].isDepAdded === 1) {
-      //   console.log("[SilkPay Webhook] Duplicate callback, already processed:", mOrderId);
-      //   return res.status(200).send("OK");
-      // }
+      // Duplicate callback protection - check if already processed
+      const [existing] = await db.execute(
+        "SELECT isDepAdded, recharge_status FROM recharge WHERE order_id = ? LIMIT 1",
+        [mOrderId]
+      );
 
-      // TODO: Update database - mark payment as completed
-      // Update recharge_status to "completed" and set trade_no
-      // await db.execute(
-      //   "UPDATE recharge SET recharge_status = ?, trade_no = ?, isDepAdded = 1 WHERE order_id = ?",
-      //   ["completed", tradeNo, mOrderId]
-      // );
+      if (existing.length > 0 && existing[0].isDepAdded === 1) {
+        console.log("[SilkPay Webhook] Duplicate callback, already processed:", mOrderId);
+        return res.status(200).send("OK");
+      }
+
+      // Update database - mark payment as completed
+      await db.execute(
+        "UPDATE recharge SET recharge_status = ?, trade_no = ?, isDepAdded = 1 WHERE order_id = ?",
+        ["completed", tradeNo, mOrderId]
+      );
+
+      console.log("[SilkPay Webhook] Database updated - order marked as completed:", mOrderId);
 
       // TODO: Add user balance/wallet update logic here
       // await updateUserBalance(mOrderId, amount);
+      // console.log("[SilkPay Webhook] User balance updated for order:", mOrderId);
 
       console.log("[SilkPay Webhook] Payment processed successfully:", mOrderId);
     } else {
@@ -318,6 +340,7 @@ const webhookHandler = async (req, res) => {
     return res.status(200).send("OK");
   } catch (error) {
     console.error("[SilkPay Webhook] Error processing callback:", error.message);
+    console.error("[SilkPay Webhook] Stack:", error.stack);
 
     // Even on error, return "OK" to stop SilkPay retries
     // Log the error internally but acknowledge receipt
