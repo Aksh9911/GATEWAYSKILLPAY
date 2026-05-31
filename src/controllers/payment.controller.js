@@ -101,7 +101,7 @@ const createUserOrderHandler = async (req, res) => {
       "skillpay", // Fixed payment_mode for this endpoint
       date,
       time,
-      silkpayTimestamp, // Store original SilkPay timestamp
+      silkpayTimestamp || Date.now(), // Store original SilkPay timestamp (fallback to now if undefined)
       recharge_status,
       0
     ]);
@@ -111,6 +111,9 @@ const createUserOrderHandler = async (req, res) => {
       paymentUrl: paymentUrl,
     });
   } catch (error) {
+    console.error("[createUserOrderHandler] Error:", error.message);
+    console.error("[createUserOrderHandler] SQL Error:", error.sqlMessage || "N/A");
+    console.error("[createUserOrderHandler] Stack:", error.stack);
     res.status(500).json({
       success: false,
       error: error.message,
