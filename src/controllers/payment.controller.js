@@ -76,6 +76,7 @@ const createUserOrderHandler = async (req, res) => {
     // Insert into recharge table
     const orderDetails = response?.orderDetails;
     const order_id = orderDetails?.mOrderId;
+    const silkpayTimestamp = orderDetails?.timestamp; // Store original timestamp
     const recharge_id = order_id; // recharge_id = order_id (same value)
     const recharge_amount = parseFloat(amount);
     const now = new Date();
@@ -86,8 +87,8 @@ const createUserOrderHandler = async (req, res) => {
     const query = `
       INSERT INTO recharge (
         recharge_id, order_id, userId, user_mobile, recharge_amount,
-        recharge_type, payment_mode, date, time, recharge_status, isDepAdded
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        recharge_type, payment_mode, date, time, silkpay_timestamp, recharge_status, isDepAdded
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     await db.execute(query, [
@@ -100,6 +101,7 @@ const createUserOrderHandler = async (req, res) => {
       "skillpay", // Fixed payment_mode for this endpoint
       date,
       time,
+      silkpayTimestamp, // Store original SilkPay timestamp
       recharge_status,
       0
     ]);

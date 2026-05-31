@@ -175,19 +175,18 @@ const getPaymentStatus = async (paymentId, merchantOrderId) => {
       throw new Error("Missing required parameter: merchantOrderId or paymentId");
     }
 
-    // Fetch timestamp from recharge table using mOrderId (which equals order_id)
+    // Fetch silkpay_timestamp from recharge table using mOrderId
     const [rows] = await db.execute(
-      "SELECT date, time FROM recharge WHERE order_id = ? LIMIT 1",
+      "SELECT silkpay_timestamp FROM recharge WHERE order_id = ? LIMIT 1",
       [mOrderId]
     );
 
     let timestamp;
-    if (rows.length > 0 && rows[0].date && rows[0].time) {
-      // Combine date and time from database and convert to timestamp
-      const dateTimeStr = `${rows[0].date} ${rows[0].time}`;
-      timestamp = new Date(dateTimeStr).getTime();
+    if (rows.length > 0 && rows[0].silkpay_timestamp) {
+      // Use the original SilkPay timestamp stored during order creation
+      timestamp = rows[0].silkpay_timestamp;
     } else {
-      // Fallback to current timestamp if not found in database
+      // Fallback to current timestamp if not found (old orders without the column)
       timestamp = Date.now();
     }
 
@@ -201,6 +200,13 @@ const getPaymentStatus = async (paymentId, merchantOrderId) => {
     // Generate sign: md5(mId + mOrderId + timestamp + key) - exact order, 32-bit lowercase
     const signString = `${payload.mId}${payload.mOrderId}${payload.timestamp}${config.secretKey}`;
     payload.sign = crypto.createHash("md5").update(signString).digest("hex");
+
+    // DEBUG: Log the sign details
+    console.log("[DEBUG] SilkPay Query Status:");
+    console.log("[DEBUG] mOrderId:", mOrderId);
+    console.log("[DEBUG] timestamp:", timestamp);
+    console.log("[DEBUG] signString:", signString);
+    console.log("[DEBUG] sign:", payload.sign);
 
     const response = await axios.post(
       `${config.baseURL}${config.statusEndpoint}`,
