@@ -349,7 +349,7 @@ const verifyWebhookSignature = (payload, signature) => {
 const pollPendingPayments = async () => {
   try {
     const [pendingRows] = await db.execute(
-      "SELECT order_id, silkpay_timestamp FROM recharge WHERE recharge_status = 'pending' AND isDepAdded = 0 AND payment_mode = 'skillpay'"
+      "SELECT order_id, silkpay_timestamp, userId, recharge_amount FROM recharge WHERE recharge_status = 'pending' AND isDepAdded = 0 AND payment_mode = 'skillpay'"
     );
 
     if (pendingRows.length === 0) return;
@@ -360,6 +360,8 @@ const pollPendingPayments = async () => {
       try {
         const mOrderId = row.order_id;
         const timestamp = row.silkpay_timestamp || Date.now();
+        const userId = row.userId;
+        const rechargeAmount = parseFloat(row.recharge_amount);
 
         const payload = {
           mId: config.merchantId,
@@ -393,6 +395,31 @@ const pollPendingPayments = async () => {
             [mOrderId]
           );
           console.log(`[Poller] Order ${mOrderId} marked as COMPLETED.`);
+
+          // Call platform APIs: deposit record + wallet balance update
+          try {
+            const platformBaseURL = process.env.PLATFORM_BASE_URL || "https://api.rollix777.com";
+
+            // Step 1: Create deposit record
+            const depositRes = await axios.post(
+              `${platformBaseURL}/api/user/deposit`,
+              { userId, amount: rechargeAmount, cryptoname: "INR", orderid: mOrderId },
+              { headers: { "Content-Type": "application/json" }, timeout: 15000 }
+            );
+            console.log(`[Poller] Deposit API response for ${mOrderId}:`, depositRes.data);
+
+            // Step 2: Update wallet balance
+            const walletRes = await axios.post(
+              `${platformBaseURL}/api/user/wallet/balance`,
+              { userId, cryptoname: "INR", balance: rechargeAmount },
+              { headers: { "Content-Type": "application/json" }, timeout: 15000 }
+            );
+            console.log(`[Poller] Wallet API response for ${mOrderId}:`, walletRes.data);
+
+          } catch (platformErr) {
+            console.error(`[Poller] CRITICAL: Platform API failed for order ${mOrderId}:`, platformErr.message);
+            console.error(`[Poller] Manual intervention required - recharge marked complete but deposit/wallet may not be updated.`);
+          }
         }
       } catch (err) {
         console.error(`[Poller] Error checking order ${row.order_id}:`, err.message);
