@@ -58,6 +58,7 @@ const createPayment = async (paymentData) => {
       amount: String(paymentData.amount),
       timestamp: timestamp,
       notifyUrl: paymentData.callbackUrl || paymentData.notifyUrl || config.notifyUrl,
+      returnUrl: paymentData.returnUrl || config.returnUrl,
     };
 
     // Generate sign: md5(mId + mOrderId + amount + timestamp + secret)
@@ -66,11 +67,15 @@ const createPayment = async (paymentData) => {
 
     const url = `${config.baseURL}${config.createEndpoint}`;
 
+    console.log("[createPayment] Calling SilkPay:", url);
+    console.log("[createPayment] Payload mId:", payload.mId, "mOrderId:", payload.mOrderId, "notifyUrl:", payload.notifyUrl, "returnUrl:", payload.returnUrl);
+
     const response = await axios.post(url, payload, {
       headers: { "Content-Type": "application/json" },
       timeout: 10000
     });
 
+    console.log("[createPayment] SilkPay response:", JSON.stringify(response.data));
     return response.data;
   } catch (error) {
     const errorMessage = error.response?.data?.message
@@ -113,6 +118,7 @@ const createUserOrder = async (amount) => {
       mOrderId: mOrderId,
       timestamp: timestamp,
       notifyUrl: notifyUrl,
+      returnUrl: config.returnUrl,
     };
 
     // Generate sign: md5(mId + mOrderId + amount + timestamp + secret)
@@ -122,7 +128,7 @@ const createUserOrder = async (amount) => {
     const url = `${config.baseURL}${config.createEndpoint}`;
 
     console.log("[createUserOrder] Calling SilkPay:", url);
-    console.log("[createUserOrder] Payload mId:", payload.mId, "mOrderId:", payload.mOrderId);
+    console.log("[createUserOrder] Payload mId:", payload.mId, "mOrderId:", payload.mOrderId, "notifyUrl:", payload.notifyUrl, "returnUrl:", payload.returnUrl);
 
     const response = await axios.post(url, payload, {
       headers: { "Content-Type": "application/json" },
@@ -390,10 +396,16 @@ const pollPendingPayments = async () => {
         }
 
         if (silkpayStatus === 1) {
-          await db.execute(
+          const [updateResult] = await db.execute(
             "UPDATE recharge SET recharge_status = 'completed', isDepAdded = 1 WHERE order_id = ? AND isDepAdded = 0",
             [mOrderId]
           );
+
+          if (updateResult.affectedRows === 0) {
+            console.log(`[Poller] Order ${mOrderId} already processed by webhook, skipping platform API calls.`);
+            continue;
+          }
+
           console.log(`[Poller] Order ${mOrderId} marked as COMPLETED.`);
 
           // Call platform APIs: deposit record + wallet balance update

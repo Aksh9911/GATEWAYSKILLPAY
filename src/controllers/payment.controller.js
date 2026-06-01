@@ -1,3 +1,4 @@
+const axios = require("axios");
 const silkpayService = require("../services/silkpay.service");
 const db = require("../config/database");
 const crypto = require("crypto");
@@ -317,17 +318,53 @@ const webhookHandler = async (req, res) => {
         return res.status(200).send("OK");
       }
 
-      // Update database - mark payment as completed
-      await db.execute(
-        "UPDATE recharge SET recharge_status = ?, trade_no = ?, isDepAdded = 1 WHERE order_id = ?",
+      // Update database - mark payment as completed (only if not already done)
+      const [updateResult] = await db.execute(
+        "UPDATE recharge SET recharge_status = ?, trade_no = ?, isDepAdded = 1 WHERE order_id = ? AND isDepAdded = 0",
         ["completed", tradeNo, mOrderId]
       );
 
+      if (updateResult.affectedRows === 0) {
+        console.log("[SilkPay Webhook] Already processed by poller, skipping platform API calls:", mOrderId);
+        return res.status(200).send("OK");
+      }
+
       console.log("[SilkPay Webhook] Database updated - order marked as completed:", mOrderId);
 
-      // TODO: Add user balance/wallet update logic here
-      // await updateUserBalance(mOrderId, amount);
-      // console.log("[SilkPay Webhook] User balance updated for order:", mOrderId);
+      // Call platform APIs: deposit record + wallet balance update
+      try {
+        const [rechargeRow] = await db.execute(
+          "SELECT userId, recharge_amount FROM recharge WHERE order_id = ? LIMIT 1",
+          [mOrderId]
+        );
+
+        if (rechargeRow.length > 0) {
+          const userId = rechargeRow[0].userId;
+          const rechargeAmount = parseFloat(rechargeRow[0].recharge_amount);
+          const platformBaseURL = process.env.PLATFORM_BASE_URL || "https://api.rollix777.com";
+
+          // Step 1: Create deposit record
+          const depositRes = await axios.post(
+            `${platformBaseURL}/api/user/deposit`,
+            { userId, amount: rechargeAmount, cryptoname: "INR", orderid: mOrderId },
+            { headers: { "Content-Type": "application/json" }, timeout: 15000 }
+          );
+          console.log("[SilkPay Webhook] Deposit API response:", depositRes.data);
+
+          // Step 2: Update wallet balance
+          const walletRes = await axios.post(
+            `${platformBaseURL}/api/user/wallet/balance`,
+            { userId, cryptoname: "INR", balance: rechargeAmount },
+            { headers: { "Content-Type": "application/json" }, timeout: 15000 }
+          );
+          console.log("[SilkPay Webhook] Wallet API response:", walletRes.data);
+        } else {
+          console.error("[SilkPay Webhook] No recharge row found for platform API call, order:", mOrderId);
+        }
+      } catch (platformErr) {
+        console.error("[SilkPay Webhook] CRITICAL: Platform API failed for order:", mOrderId, platformErr.message);
+        console.error("[SilkPay Webhook] Manual intervention required - deposit/wallet may not be updated.");
+      }
 
       console.log("[SilkPay Webhook] Payment processed successfully:", mOrderId);
     } else {
