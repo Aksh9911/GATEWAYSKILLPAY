@@ -258,130 +258,82 @@ const queryUtrHandler = async (req, res) => {
  */
 const webhookHandler = async (req, res) => {
   try {
-    // Log complete request body for debugging
     console.log("[SilkPay Webhook] Received callback:", JSON.stringify(req.body, null, 2));
 
-    // Extract SilkPay callback fields
-    const {
-      mOrderId,    // Merchant order ID (same as recharge_id in DB)
-      tradeNo,     // SilkPay transaction ID
-      amount,      // Payment amount
-      status,      // Should be "SUCCESS" for successful payments
-      sign,        // Signature for verification
-      timestamp,   // Callback timestamp (needed for sign verification)
-    } = req.body;
+    // Extract only what we need: mOrderId and status
+    const { mOrderId, status } = req.body;
 
-    // Log extracted fields
-    console.log("[SilkPay Webhook] Extracted fields:", {
-      mOrderId,
-      tradeNo,
-      amount,
-      status,
-      sign,
-      timestamp,
-    });
+    console.log("[SilkPay Webhook] Extracted fields:", { mOrderId, status });
 
     // Validate required fields
-    if (!mOrderId || !tradeNo || !amount || !sign) {
-      console.error("[SilkPay Webhook] Missing required fields");
+    if (!mOrderId) {
+      console.error("[SilkPay Webhook] Missing mOrderId");
       return res.status(200).send("OK");
     }
 
-    // Verify signature: md5(mId + mOrderId + amount + timestamp + secretKey)
-    const expectedSign = crypto
-      .createHash("md5")
-      .update(`${config.merchantId}${mOrderId}${amount}${timestamp}${config.secretKey}`)
-      .digest("hex");
-
-    if (sign !== expectedSign) {
-      console.error("[SilkPay Webhook] Invalid signature");
-      console.error("[SilkPay Webhook] Expected:", expectedSign);
-      console.error("[SilkPay Webhook] Received:", sign);
-      return res.status(200).send("OK"); // Still return OK to stop retries, but don't process
+    // Only process when status === 1 (success)
+    if (status !== 1) {
+      console.log(`[SilkPay Webhook] Status is ${status} (not 1), ignoring order:`, mOrderId);
+      return res.status(200).send("OK");
     }
 
-    console.log("[SilkPay Webhook] Signature verified successfully");
+    console.log("[SilkPay Webhook] Payment SUCCESS (status=1) for order:", mOrderId);
 
-    // SilkPay only sends callbacks for SUCCESS payments
-    // But we check status anyway for safety
-    if (status === "SUCCESS" || status === "success") {
-      console.log("[SilkPay Webhook] Payment SUCCESS confirmed for order:", mOrderId, "Trade:", tradeNo);
+    // Atomic update — AND isDepAdded = 0 prevents duplicate processing
+    const [updateResult] = await db.execute(
+      "UPDATE recharge SET recharge_status = 'completed', isDepAdded = 1 WHERE order_id = ? AND isDepAdded = 0",
+      [mOrderId]
+    );
 
-      // Duplicate callback protection - check if already processed
-      const [existing] = await db.execute(
-        "SELECT isDepAdded, recharge_status FROM recharge WHERE order_id = ? LIMIT 1",
+    if (updateResult.affectedRows === 0) {
+      console.log("[SilkPay Webhook] Already processed, skipping platform API calls:", mOrderId);
+      return res.status(200).send("OK");
+    }
+
+    console.log("[SilkPay Webhook] DB updated - order marked completed:", mOrderId);
+
+    // Call platform APIs: deposit record + wallet balance update
+    try {
+      const [rechargeRow] = await db.execute(
+        "SELECT userId, recharge_amount FROM recharge WHERE order_id = ? LIMIT 1",
         [mOrderId]
       );
 
-      if (existing.length > 0 && existing[0].isDepAdded === 1) {
-        console.log("[SilkPay Webhook] Duplicate callback, already processed:", mOrderId);
+      if (rechargeRow.length === 0) {
+        console.error("[SilkPay Webhook] No recharge row found for order:", mOrderId);
         return res.status(200).send("OK");
       }
 
-      // Update database - mark payment as completed (only if not already done)
-      const [updateResult] = await db.execute(
-        "UPDATE recharge SET recharge_status = ?, trade_no = ?, isDepAdded = 1 WHERE order_id = ? AND isDepAdded = 0",
-        ["completed", tradeNo, mOrderId]
+      const userId = rechargeRow[0].userId;
+      const rechargeAmount = parseFloat(rechargeRow[0].recharge_amount);
+      const platformBaseURL = process.env.PLATFORM_BASE_URL || "https://api.rollix777.com";
+
+      // Step 1: Create deposit record
+      const depositRes = await axios.post(
+        `${platformBaseURL}/api/user/deposit`,
+        { userId, amount: rechargeAmount, cryptoname: "INR", orderid: mOrderId },
+        { headers: { "Content-Type": "application/json" }, timeout: 15000 }
       );
+      console.log("[SilkPay Webhook] Deposit API response:", depositRes.data);
 
-      if (updateResult.affectedRows === 0) {
-        console.log("[SilkPay Webhook] Already processed by poller, skipping platform API calls:", mOrderId);
-        return res.status(200).send("OK");
-      }
+      // Step 2: Update wallet balance
+      const walletRes = await axios.post(
+        `${platformBaseURL}/api/user/wallet/balance`,
+        { userId, cryptoname: "INR", balance: rechargeAmount },
+        { headers: { "Content-Type": "application/json" }, timeout: 15000 }
+      );
+      console.log("[SilkPay Webhook] Wallet API response:", walletRes.data);
 
-      console.log("[SilkPay Webhook] Database updated - order marked as completed:", mOrderId);
-
-      // Call platform APIs: deposit record + wallet balance update
-      try {
-        const [rechargeRow] = await db.execute(
-          "SELECT userId, recharge_amount FROM recharge WHERE order_id = ? LIMIT 1",
-          [mOrderId]
-        );
-
-        if (rechargeRow.length > 0) {
-          const userId = rechargeRow[0].userId;
-          const rechargeAmount = parseFloat(rechargeRow[0].recharge_amount);
-          const platformBaseURL = process.env.PLATFORM_BASE_URL || "https://api.rollix777.com";
-
-          // Step 1: Create deposit record
-          const depositRes = await axios.post(
-            `${platformBaseURL}/api/user/deposit`,
-            { userId, amount: rechargeAmount, cryptoname: "INR", orderid: mOrderId },
-            { headers: { "Content-Type": "application/json" }, timeout: 15000 }
-          );
-          console.log("[SilkPay Webhook] Deposit API response:", depositRes.data);
-
-          // Step 2: Update wallet balance
-          const walletRes = await axios.post(
-            `${platformBaseURL}/api/user/wallet/balance`,
-            { userId, cryptoname: "INR", balance: rechargeAmount },
-            { headers: { "Content-Type": "application/json" }, timeout: 15000 }
-          );
-          console.log("[SilkPay Webhook] Wallet API response:", walletRes.data);
-        } else {
-          console.error("[SilkPay Webhook] No recharge row found for platform API call, order:", mOrderId);
-        }
-      } catch (platformErr) {
-        console.error("[SilkPay Webhook] CRITICAL: Platform API failed for order:", mOrderId, platformErr.message);
-        console.error("[SilkPay Webhook] Manual intervention required - deposit/wallet may not be updated.");
-      }
-
-      console.log("[SilkPay Webhook] Payment processed successfully:", mOrderId);
-    } else {
-      // This should not happen as SilkPay only sends SUCCESS callbacks
-      console.log("[SilkPay Webhook] Unexpected status:", status, "for order:", mOrderId);
+      console.log("[SilkPay Webhook] Payment fully processed for order:", mOrderId);
+    } catch (platformErr) {
+      console.error("[SilkPay Webhook] CRITICAL: Platform API failed for order:", mOrderId, platformErr.message);
+      console.error("[SilkPay Webhook] Manual intervention required - deposit/wallet may not be updated.");
     }
 
-    // CRITICAL: Must return exact string "OK" with HTTP 200
-    // Any other response will trigger SilkPay retry (every 5 min, up to 5 times)
     return res.status(200).send("OK");
   } catch (error) {
-    console.error("[SilkPay Webhook] Error processing callback:", error.message);
+    console.error("[SilkPay Webhook] Error:", error.message);
     console.error("[SilkPay Webhook] Stack:", error.stack);
-
-    // Even on error, return "OK" to stop SilkPay retries
-    // Log the error internally but acknowledge receipt
-    // If you return FAIL, SilkPay will retry 5 times (every 5 minutes)
     return res.status(200).send("OK");
   }
 };

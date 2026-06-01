@@ -348,100 +348,6 @@ const verifyWebhookSignature = (payload, signature) => {
   );
 };
 
-/**
- * Poll all pending payments and update status if completed (status === 1)
- * Called on an interval from app.js
- */
-const pollPendingPayments = async () => {
-  try {
-    const [pendingRows] = await db.execute(
-      "SELECT order_id, silkpay_timestamp, userId, recharge_amount FROM recharge WHERE recharge_status = 'pending' AND isDepAdded = 0 AND payment_mode = 'skillpay'"
-    );
-
-    if (pendingRows.length === 0) return;
-
-    console.log(`[Poller] Checking ${pendingRows.length} pending order(s)...`);
-
-    for (const row of pendingRows) {
-      try {
-        const mOrderId = row.order_id;
-        const timestamp = row.silkpay_timestamp || Date.now();
-        const userId = row.userId;
-        const rechargeAmount = parseFloat(row.recharge_amount);
-
-        const payload = {
-          mId: config.merchantId,
-          mOrderId,
-          timestamp,
-        };
-
-        const signString = `${payload.mId}${payload.mOrderId}${payload.timestamp}${config.secretKey}`;
-        payload.sign = crypto.createHash("md5").update(signString).digest("hex");
-
-        const response = await axios.post(
-          `${config.baseURL}${config.statusEndpoint}`,
-          payload,
-          { headers: { "Content-Type": "application/json" }, timeout: 10000 }
-        );
-
-        const responseData = response?.data?.data?.data;
-        const silkpayStatus = responseData?.status;
-        const responseMOrderId = responseData?.mOrderId;
-
-        console.log(`[Poller] Order ${mOrderId} → SilkPay status: ${silkpayStatus}, response mOrderId: ${responseMOrderId}`);
-
-        if (responseMOrderId !== mOrderId) {
-          console.warn(`[Poller] mOrderId mismatch! Expected: ${mOrderId}, Got: ${responseMOrderId}. Skipping update.`);
-          continue;
-        }
-
-        if (silkpayStatus === 1) {
-          const [updateResult] = await db.execute(
-            "UPDATE recharge SET recharge_status = 'completed', isDepAdded = 1 WHERE order_id = ? AND isDepAdded = 0",
-            [mOrderId]
-          );
-
-          if (updateResult.affectedRows === 0) {
-            console.log(`[Poller] Order ${mOrderId} already processed by webhook, skipping platform API calls.`);
-            continue;
-          }
-
-          console.log(`[Poller] Order ${mOrderId} marked as COMPLETED.`);
-
-          // Call platform APIs: deposit record + wallet balance update
-          try {
-            const platformBaseURL = process.env.PLATFORM_BASE_URL || "https://api.rollix777.com";
-
-            // Step 1: Create deposit record
-            const depositRes = await axios.post(
-              `${platformBaseURL}/api/user/deposit`,
-              { userId, amount: rechargeAmount, cryptoname: "INR", orderid: mOrderId },
-              { headers: { "Content-Type": "application/json" }, timeout: 15000 }
-            );
-            console.log(`[Poller] Deposit API response for ${mOrderId}:`, depositRes.data);
-
-            // Step 2: Update wallet balance
-            const walletRes = await axios.post(
-              `${platformBaseURL}/api/user/wallet/balance`,
-              { userId, cryptoname: "INR", balance: rechargeAmount },
-              { headers: { "Content-Type": "application/json" }, timeout: 15000 }
-            );
-            console.log(`[Poller] Wallet API response for ${mOrderId}:`, walletRes.data);
-
-          } catch (platformErr) {
-            console.error(`[Poller] CRITICAL: Platform API failed for order ${mOrderId}:`, platformErr.message);
-            console.error(`[Poller] Manual intervention required - recharge marked complete but deposit/wallet may not be updated.`);
-          }
-        }
-      } catch (err) {
-        console.error(`[Poller] Error checking order ${row.order_id}:`, err.message);
-      }
-    }
-  } catch (err) {
-    console.error("[Poller] Failed to fetch pending orders:", err.message);
-  }
-};
-
 module.exports = {
   createPayment,
   createUserOrder,
@@ -452,5 +358,4 @@ module.exports = {
   handleCallback,
   verifyWebhookSignature,
   generateSignature,
-  pollPendingPayments,
 };

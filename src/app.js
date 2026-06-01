@@ -7,7 +7,6 @@ const morgan = require("morgan");
 
 const paymentRoutes = require("./routes/payment.routes");
 const { webhookHandler } = require("./controllers/payment.controller");
-const { pollPendingPayments } = require("./services/silkpay.service");
 
 const app = express();
 
@@ -94,9 +93,6 @@ app.listen(PORT, () => {
   console.log(`📋 API Base URL: http://localhost:${PORT}/api/payments`);
   console.log(`🏥 Health Check: http://localhost:${PORT}/health`);
 
-  const POLL_INTERVAL_MS = 30 * 1000; // 30 seconds
-  setInterval(pollPendingPayments, POLL_INTERVAL_MS);
-  console.log(`🔄 Payment status poller started (every ${POLL_INTERVAL_MS / 1000}s)`);
 });
 
 module.exports = app;
