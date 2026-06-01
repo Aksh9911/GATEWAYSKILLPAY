@@ -15,5 +15,5 @@ module.exports = {
   callbackEndpoint: process.env.SILKPAY_CALLBACK_ENDPOINT || "/callback",
   // Notify URL for SilkPay callbacks
   notifyUrl: process.env.NOTIFY_URL || "https://skillpay.rollix777.com/api/payment/webhook",
-  returnUrl: process.env.RETURN_URL || "https://www.rollix777.com",
+  returnUrl: process.env.RETURN_URL || "https://r7dream.com/",
 };
