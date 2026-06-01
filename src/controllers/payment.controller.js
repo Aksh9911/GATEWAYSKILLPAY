@@ -317,7 +317,7 @@ const webhookHandler = async (req, res) => {
       console.log("[SilkPay Webhook] Deposit API response:", depositRes.data);
 
       // Step 2: Update wallet balance
-      const walletRes = await axios.post(
+      const walletRes = await axios.put(
         `${platformBaseURL}/api/user/wallet/balance`,
         { userId, cryptoname: "INR", balance: rechargeAmount },
         { headers: { "Content-Type": "application/json" }, timeout: 15000 }
