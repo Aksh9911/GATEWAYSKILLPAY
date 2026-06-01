@@ -281,7 +281,7 @@ const webhookHandler = async (req, res) => {
 
     // Atomic update — AND isDepAdded = 0 prevents duplicate processing
     const [updateResult] = await db.execute(
-      "UPDATE recharge SET recharge_status = 'completed', isDepAdded = 1 WHERE order_id = ? AND isDepAdded = 0",
+      "UPDATE recharge SET recharge_status = 'success', isDepAdded = 1 WHERE order_id = ? AND isDepAdded = 0",
       [mOrderId]
     );
 
