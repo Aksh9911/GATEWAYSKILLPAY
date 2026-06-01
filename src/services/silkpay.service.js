@@ -342,6 +342,67 @@ const verifyWebhookSignature = (payload, signature) => {
   );
 };
 
+/**
+ * Poll all pending payments and update status if completed (status === 1)
+ * Called on an interval from app.js
+ */
+const pollPendingPayments = async () => {
+  try {
+    const [pendingRows] = await db.execute(
+      "SELECT order_id, silkpay_timestamp FROM recharge WHERE recharge_status = 'pending' AND isDepAdded = 0 AND payment_mode = 'skillpay'"
+    );
+
+    if (pendingRows.length === 0) return;
+
+    console.log(`[Poller] Checking ${pendingRows.length} pending order(s)...`);
+
+    for (const row of pendingRows) {
+      try {
+        const mOrderId = row.order_id;
+        const timestamp = row.silkpay_timestamp || Date.now();
+
+        const payload = {
+          mId: config.merchantId,
+          mOrderId,
+          timestamp,
+        };
+
+        const signString = `${payload.mId}${payload.mOrderId}${payload.timestamp}${config.secretKey}`;
+        payload.sign = crypto.createHash("md5").update(signString).digest("hex");
+
+        const response = await axios.post(
+          `${config.baseURL}${config.statusEndpoint}`,
+          payload,
+          { headers: { "Content-Type": "application/json" }, timeout: 10000 }
+        );
+
+        const responseData = response?.data?.data?.data;
+        const silkpayStatus = responseData?.status;
+        const responseMOrderId = responseData?.mOrderId;
+
+        console.log(`[Poller] Order ${mOrderId} → SilkPay status: ${silkpayStatus}, response mOrderId: ${responseMOrderId}`);
+
+        if (responseMOrderId !== mOrderId) {
+          console.warn(`[Poller] mOrderId mismatch! Expected: ${mOrderId}, Got: ${responseMOrderId}. Skipping update.`);
+          continue;
+        }
+
+        if (silkpayStatus === 1) {
+          await db.execute(
+            "UPDATE recharge SET recharge_status = 'completed', isDepAdded = 1 WHERE order_id = ? AND isDepAdded = 0",
+            [mOrderId]
+          );
+          console.log(`[Poller] Order ${mOrderId} marked as COMPLETED.`);
+        }
+      } catch (err) {
+        console.error(`[Poller] Error checking order ${row.order_id}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error("[Poller] Failed to fetch pending orders:", err.message);
+  }
+};
+
 module.exports = {
   createPayment,
   createUserOrder,
@@ -352,4 +413,5 @@ module.exports = {
   handleCallback,
   verifyWebhookSignature,
   generateSignature,
+  pollPendingPayments,
 };
