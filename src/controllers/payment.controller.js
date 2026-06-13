@@ -316,13 +316,15 @@ const webhookHandler = async (req, res) => {
       );
       console.log("[SilkPay Webhook] Deposit API response:", depositRes.data);
 
-      // Step 2: Update wallet balance
+      // Step 2: Update wallet balance (with 10% bonus)
+      const bonusAmount = rechargeAmount * 1.10;
       const walletRes = await axios.put(
         `${platformBaseURL}/api/user/wallet/balance`,
-        { userId, cryptoname: "INR", balance: rechargeAmount },
+        { userId, cryptoname: "INR", balance: bonusAmount },
         { headers: { "Content-Type": "application/json" }, timeout: 15000 }
       );
       console.log("[SilkPay Webhook] Wallet API response:", walletRes.data);
+      console.log("[SilkPay Webhook] Bonus applied:", { original: rechargeAmount, bonus: bonusAmount });
 
       console.log("[SilkPay Webhook] Payment fully processed for order:", mOrderId);
     } catch (platformErr) {
