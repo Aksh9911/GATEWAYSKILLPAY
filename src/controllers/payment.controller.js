@@ -3,6 +3,7 @@ const silkpayService = require("../services/silkpay.service");
 const db = require("../config/database");
 const crypto = require("crypto");
 const config = require("../config/silkpay");
+const logger = require("../utils/logger");
 
 /**
  * Create a new payment (SilkPay format)
@@ -114,9 +115,8 @@ const createUserOrderHandler = async (req, res) => {
       paymentUrl: paymentUrl,
     });
   } catch (error) {
-    console.error("[createUserOrderHandler] Error:", error.message);
-    console.error("[createUserOrderHandler] SQL Error:", error.sqlMessage || "N/A");
-    console.error("[createUserOrderHandler] Stack:", error.stack);
+    logger.logError("PayIn:createUserOrderHandler", error.message, error);
+    logger.error("PayIn:createUserOrderHandler", "SQL Error: " + (error.sqlMessage || "N/A"));
     res.status(500).json({
       success: false,
       error: error.message,
@@ -258,26 +258,25 @@ const queryUtrHandler = async (req, res) => {
  */
 const webhookHandler = async (req, res) => {
   try {
-    console.log("[SilkPay Webhook] Received callback:", JSON.stringify(req.body, null, 2));
+    logger.logWebhook("PayIn:Webhook", "/api/payment/webhook", req.body);
 
     // Extract only what we need: mOrderId and status
     const { mOrderId, status } = req.body;
-
-    console.log("[SilkPay Webhook] Extracted fields:", { mOrderId, status });
+    logger.info("PayIn:Webhook", "Extracted fields", { mOrderId, status });
 
     // Validate required fields
     if (!mOrderId) {
-      console.error("[SilkPay Webhook] Missing mOrderId");
+      logger.error("PayIn:Webhook", "Missing mOrderId in callback payload", req.body);
       return res.status(200).send("OK");
     }
 
     // Only process when status === 1 (success)
     if (status !== 1) {
-      console.log(`[SilkPay Webhook] Status is ${status} (not 1), ignoring order:`, mOrderId);
+      logger.info("PayIn:Webhook", `Status=${status} (not 1), ignoring`, { mOrderId });
       return res.status(200).send("OK");
     }
 
-    console.log("[SilkPay Webhook] Payment SUCCESS (status=1) for order:", mOrderId);
+    logger.info("PayIn:Webhook", "Payment SUCCESS (status=1)", { mOrderId });
 
     // Atomic update — AND isDepAdded = 0 prevents duplicate processing
     const [updateResult] = await db.execute(
@@ -286,11 +285,11 @@ const webhookHandler = async (req, res) => {
     );
 
     if (updateResult.affectedRows === 0) {
-      console.log("[SilkPay Webhook] Already processed, skipping platform API calls:", mOrderId);
+      logger.warn("PayIn:Webhook", "Already processed, skipping", { mOrderId });
       return res.status(200).send("OK");
     }
 
-    console.log("[SilkPay Webhook] DB updated - order marked completed:", mOrderId);
+    logger.info("PayIn:Webhook", "DB updated — order marked completed", { mOrderId });
 
     // Call platform APIs: deposit record + wallet balance update
     try {
@@ -300,7 +299,7 @@ const webhookHandler = async (req, res) => {
       );
 
       if (rechargeRow.length === 0) {
-        console.error("[SilkPay Webhook] No recharge row found for order:", mOrderId);
+        logger.error("PayIn:Webhook", "No recharge row found", { mOrderId });
         return res.status(200).send("OK");
       }
 
@@ -314,7 +313,7 @@ const webhookHandler = async (req, res) => {
         { userId, amount: rechargeAmount, cryptoname: "INR", orderid: mOrderId },
         { headers: { "Content-Type": "application/json" }, timeout: 15000 }
       );
-      console.log("[SilkPay Webhook] Deposit API response:", depositRes.data);
+      logger.logResponse("PayIn:Webhook:DepositAPI", `${platformBaseURL}/api/user/deposit`, depositRes.data);
 
       // Step 2: Update wallet balance (with 10% bonus)
       const bonusAmount = rechargeAmount * 1.10;
@@ -323,19 +322,17 @@ const webhookHandler = async (req, res) => {
         { userId, cryptoname: "INR", balance: bonusAmount },
         { headers: { "Content-Type": "application/json" }, timeout: 15000 }
       );
-      console.log("[SilkPay Webhook] Wallet API response:", walletRes.data);
-      console.log("[SilkPay Webhook] Bonus applied:", { original: rechargeAmount, bonus: bonusAmount });
+      logger.logResponse("PayIn:Webhook:WalletAPI", `${platformBaseURL}/api/user/wallet/balance`, walletRes.data);
+      logger.info("PayIn:Webhook", "Bonus applied", { original: rechargeAmount, bonus: bonusAmount });
 
-      console.log("[SilkPay Webhook] Payment fully processed for order:", mOrderId);
+      logger.info("PayIn:Webhook", "Payment fully processed", { mOrderId });
     } catch (platformErr) {
-      console.error("[SilkPay Webhook] CRITICAL: Platform API failed for order:", mOrderId, platformErr.message);
-      console.error("[SilkPay Webhook] Manual intervention required - deposit/wallet may not be updated.");
+      logger.logError("PayIn:Webhook", `CRITICAL: Platform API failed for order ${mOrderId} — manual intervention required`, platformErr);
     }
 
     return res.status(200).send("OK");
   } catch (error) {
-    console.error("[SilkPay Webhook] Error:", error.message);
-    console.error("[SilkPay Webhook] Stack:", error.stack);
+    logger.logError("PayIn:Webhook", "Unexpected error in webhook handler", error);
     return res.status(200).send("OK");
   }
 };

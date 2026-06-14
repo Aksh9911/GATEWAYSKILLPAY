@@ -2,6 +2,7 @@ const axios = require("axios");
 const crypto = require("crypto");
 const config = require("../config/silkpay");
 const db = require("../config/database");
+const logger = require("../utils/logger");
 
 /**
  * Generate authentication signature for SilkPay API
@@ -66,22 +67,22 @@ const createPayment = async (paymentData) => {
     payload.sign = crypto.createHash("md5").update(signString).digest("hex");
 
     const url = `${config.baseURL}${config.createEndpoint}`;
-
-    console.log("[createPayment] Calling SilkPay:", url);
-    console.log("[createPayment] Payload mId:", payload.mId, "mOrderId:", payload.mOrderId, "notifyUrl:", payload.notifyUrl, "returnUrl:", payload.returnUrl);
+    logger.logSign("PayIn:createPayment", signString, payload.sign);
+    logger.logRequest("PayIn:createPayment", url, payload);
 
     const response = await axios.post(url, payload, {
       headers: { "Content-Type": "application/json" },
       timeout: 10000
     });
 
-    console.log("[createPayment] SilkPay response:", JSON.stringify(response.data));
+    logger.logResponse("PayIn:createPayment", url, response.data);
     return response.data;
   } catch (error) {
     const errorMessage = error.response?.data?.message
       || error.response?.data?.error
       || error.message
       || "Failed to create payment";
+    logger.logError("PayIn:createPayment", errorMessage, error);
     throw new Error(errorMessage);
   }
 };
@@ -126,15 +127,15 @@ const createUserOrder = async (amount) => {
     payload.sign = crypto.createHash("md5").update(signString).digest("hex");
 
     const url = `${config.baseURL}${config.createEndpoint}`;
-
-    console.log("[createUserOrder] Calling SilkPay:", url);
-    console.log("[createUserOrder] Payload mId:", payload.mId, "mOrderId:", payload.mOrderId, "notifyUrl:", payload.notifyUrl, "returnUrl:", payload.returnUrl);
+    logger.logSign("PayIn:createUserOrder", signString, payload.sign);
+    logger.logRequest("PayIn:createUserOrder", url, payload);
 
     const response = await axios.post(url, payload, {
       headers: { "Content-Type": "application/json" },
-      timeout: 30000 // Increased to 30 seconds
+      timeout: 30000
     });
 
+    logger.logResponse("PayIn:createUserOrder", url, response.data);
     return {
       silkpayResponse: response.data,
       orderDetails: {
@@ -145,14 +146,11 @@ const createUserOrder = async (amount) => {
       }
     };
   } catch (error) {
-    console.error("[createUserOrder] SilkPay Error:", error.message);
-    if (error.response) {
-      console.error("[createUserOrder] SilkPay Response:", error.response.data);
-    }
     const errorMessage = error.response?.data?.message
       || error.response?.data?.error
       || error.message
       || "Failed to create user order";
+    logger.logError("PayIn:createUserOrder", errorMessage, error);
     throw new Error(errorMessage);
   }
 };
@@ -214,21 +212,20 @@ const getPaymentStatus = async (paymentId, merchantOrderId) => {
     const signString = `${payload.mId}${payload.mOrderId}${payload.timestamp}${config.secretKey}`;
     payload.sign = crypto.createHash("md5").update(signString).digest("hex");
 
-    // DEBUG: Log the sign details
-    console.log("[DEBUG] SilkPay Query Status:");
-    console.log("[DEBUG] mOrderId:", mOrderId);
-    console.log("[DEBUG] timestamp:", timestamp);
-    console.log("[DEBUG] signString:", signString);
-    console.log("[DEBUG] sign:", payload.sign);
+    const statusUrl = `${config.baseURL}${config.statusEndpoint}`;
+    logger.logSign("PayIn:getPaymentStatus", signString, payload.sign);
+    logger.logRequest("PayIn:getPaymentStatus", statusUrl, payload);
 
     const response = await axios.post(
-      `${config.baseURL}${config.statusEndpoint}`,
+      statusUrl,
       payload,
       { headers: { "Content-Type": "application/json" }, timeout: 10000 }
     );
 
+    logger.logResponse("PayIn:getPaymentStatus", statusUrl, response.data);
     return response.data;
   } catch (error) {
+    logger.logError("PayIn:getPaymentStatus", error.message || "Failed to get payment status", error);
     throw new Error(error.response?.data?.message || "Failed to get payment status");
   }
 };
@@ -257,14 +254,20 @@ const submitUtr = async (paymentId, utrNumber, merchantOrderId) => {
     const signString = `${params}&key=${config.secretKey}`;
     payload.sign = crypto.createHash("md5").update(signString).digest("hex");
 
+    const submitUrl = `${config.baseURL}${config.submitUtrEndpoint}`;
+    logger.logSign("PayIn:submitUtr", signString, payload.sign);
+    logger.logRequest("PayIn:submitUtr", submitUrl, payload);
+
     const response = await axios.post(
-      `${config.baseURL}${config.submitUtrEndpoint}`,
+      submitUrl,
       payload,
       { headers: { "Content-Type": "application/json" }, timeout: 10000 }
     );
 
+    logger.logResponse("PayIn:submitUtr", submitUrl, response.data);
     return response.data;
   } catch (error) {
+    logger.logError("PayIn:submitUtr", error.message || "Failed to submit UTR", error);
     throw new Error(error.response?.data?.message || "Failed to submit UTR");
   }
 };
@@ -289,14 +292,20 @@ const queryUtr = async (utrNumber) => {
     const signString = `${params}&key=${config.secretKey}`;
     payload.sign = crypto.createHash("md5").update(signString).digest("hex");
 
+    const queryUtrUrl = `${config.baseURL}${config.queryUtrEndpoint}`;
+    logger.logSign("PayIn:queryUtr", signString, payload.sign);
+    logger.logRequest("PayIn:queryUtr", queryUtrUrl, payload);
+
     const response = await axios.post(
-      `${config.baseURL}${config.queryUtrEndpoint}`,
+      queryUtrUrl,
       payload,
       { headers: { "Content-Type": "application/json" }, timeout: 10000 }
     );
 
+    logger.logResponse("PayIn:queryUtr", queryUtrUrl, response.data);
     return response.data;
   } catch (error) {
+    logger.logError("PayIn:queryUtr", error.message || "Failed to query UTR", error);
     throw new Error(error.response?.data?.message || "Failed to query UTR");
   }
 };

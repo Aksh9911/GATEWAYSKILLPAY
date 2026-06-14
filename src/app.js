@@ -6,7 +6,10 @@ const helmet = require("helmet");
 const morgan = require("morgan");
 
 const paymentRoutes = require("./routes/payment.routes");
+const payoutRoutes = require("./routes/payout.routes");
 const { webhookHandler } = require("./controllers/payment.controller");
+const { payoutWebhookHandler } = require("./controllers/payout.controller");
+const logger = require("./utils/logger");
 
 const app = express();
 
@@ -20,19 +23,26 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-// Logging middleware
-app.use(morgan("combined"));
+// Logging middleware — writes HTTP access log to console AND daily log file
+app.use(morgan("combined", { stream: logger.morganStream }));
+app.use(morgan("dev"));
 
 // Body parsing middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// SilkPay Webhook endpoint (must be at exact URL used in notifyUrl)
+// SilkPay PayIn Webhook endpoint (must be at exact URL used in notifyUrl)
 // This route is registered separately to ensure it's at /api/payment/webhook
 app.post("/api/payment/webhook", webhookHandler);
 
+// SilkPay Payout Webhook endpoint (must be at exact URL used in payout notifyUrl)
+app.post("/api/payout/webhook", payoutWebhookHandler);
+
 // API routes (all other payment endpoints)
 app.use("/api/payments", paymentRoutes);
+
+// Payout API routes
+app.use("/api/payout", payoutRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => {
@@ -55,14 +65,20 @@ app.get("/", (req, res) => {
       queryUtr: "POST /api/payments/query-utr",
       verifyPayment: "GET /api/payments/verify/:paymentId",
       webhook: "POST /api/payment/webhook",
+      createPayout: "POST /api/payout/create",
+      payoutStatus: "POST /api/payout/status",
+      merchantBalance: "GET /api/payout/balance",
+      payoutWebhook: "POST /api/payout/webhook",
       health: "GET /health",
     },
     silkpayEndpoints: {
-      create: "POST https://api.dev.silkpay.ai/transaction/payin/v2",
-      query: "POST https://api.dev.silkpay.ai/transaction/payin/query",
-      submitUtr: "POST https://api.dev.silkpay.ai/transaction/payin/submit/utr",
-      queryUtr: "POST https://api.dev.silkpay.ai/transaction/payin/query/utr",
-      callback: "POST https://api.dev.silkpay.ai/callback",
+      payin_create: "POST https://api.silkpay.ai/transaction/payin/v2",
+      payin_query: "POST https://api.silkpay.ai/transaction/payin/query",
+      payin_submitUtr: "POST https://api.silkpay.ai/transaction/payin/submit/utr",
+      payin_queryUtr: "POST https://api.silkpay.ai/transaction/payin/query/utr",
+      payout_create: "POST https://api.silkpay.ai/transaction/payout",
+      payout_query: "POST https://api.silkpay.ai/transaction/payout/query",
+      balance: "POST https://api.silkpay.ai/transaction/balance",
     },
     documentation: "https://silkpay.stoplight.io/docs/silkpay/branches/main/30sk57lgvy7qx-guide",
   });
@@ -78,7 +94,7 @@ app.use((req, res) => {
 
 // Global error handler
 app.use((err, req, res, next) => {
-  console.error("Unhandled Error:", err);
+  logger.logError("App:GlobalErrorHandler", "Unhandled error", err);
   res.status(500).json({
     success: false,
     error: "Internal server error",
@@ -89,10 +105,10 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 SilkPay Gateway Server running on port ${PORT}`);
-  console.log(`📋 API Base URL: http://localhost:${PORT}/api/payments`);
-  console.log(`🏥 Health Check: http://localhost:${PORT}/health`);
-
+  logger.info("App", `SilkPay Gateway Server running on port ${PORT}`);
+  logger.info("App", `PayIn  API: http://localhost:${PORT}/api/payments`);
+  logger.info("App", `Payout API: http://localhost:${PORT}/api/payout`);
+  logger.info("App", `Health:     http://localhost:${PORT}/health`);
 });
 
 module.exports = app;

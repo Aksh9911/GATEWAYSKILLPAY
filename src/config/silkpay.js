@@ -16,4 +16,10 @@ module.exports = {
   // Notify URL for SilkPay callbacks
   notifyUrl: process.env.NOTIFY_URL || "https://skillpay.rollix777.com/api/payment/webhook",
   returnUrl: process.env.RETURN_URL || "https://r7dream.com/",
+  // Payout API Endpoints
+  payoutEndpoint: process.env.SILKPAY_PAYOUT_ENDPOINT || "/transaction/payout",
+  payoutStatusEndpoint: process.env.SILKPAY_PAYOUT_STATUS_ENDPOINT || "/transaction/payout/query",
+  balanceEndpoint: process.env.SILKPAY_BALANCE_ENDPOINT || "/transaction/balance",
+  // Payout Notify URL
+  payoutNotifyUrl: process.env.PAYOUT_NOTIFY_URL || "https://skillpay.rollix777.com/api/payout/webhook",
 };
