@@ -84,8 +84,9 @@ const createUserOrderHandler = async (req, res) => {
     const recharge_id = order_id; // recharge_id = order_id (same value)
     const recharge_amount = parseFloat(amount);
     const now = new Date();
-    const date = now.toISOString().split("T")[0];
-    const time = now.toTimeString().split(" ")[0];
+    const pad = (n) => String(n).padStart(2, "0");
+    const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     const recharge_status = "pending";
 
     const query = `
