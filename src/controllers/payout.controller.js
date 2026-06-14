@@ -1,5 +1,6 @@
 const payoutService = require("../services/silkpay.payout.service");
 const logger = require("../utils/logger");
+const db = require("../config/database");
 
 // ---------------------------------------------------------------------------
 // createPayoutHandler
@@ -10,25 +11,35 @@ const logger = require("../utils/logger");
  * POST /api/payout/create
  *
  * Body:
+ *   withdrawId  {number|string} required  - ID from withdrawl table
  *   amount      {string|number} required
- *   mOrderId    {string}        optional (auto-generated if omitted)
  *   bankNo      {string}        required
  *   ifsc        {string}        required
  *   name        {string}        required
+ *   mOrderId    {string}        optional (auto-generated if omitted)
  *   upi         {string}        optional
  *   notifyUrl   {string}        optional (overrides config default)
+ *
+ * Flow:
+ *   1. Validate payload
+ *   2. Call SilkPay payout API
+ *   3. On success → UPDATE withdrawl SET morder_id = ? WHERE id = ?
+ *   4. If DB update fails → log CRITICAL (payout is live, needs manual fix)
  */
 const createPayoutHandler = async (req, res) => {
   try {
-    const { amount, mOrderId, bankNo, ifsc, name, upi, notifyUrl } = req.body;
+    const { withdrawId, amount, mOrderId, bankNo, ifsc, name, upi, notifyUrl } = req.body;
 
-    if (!amount || !bankNo || !ifsc || !name) {
+    if (!withdrawId || !amount || !bankNo || !ifsc || !name) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields: amount, bankNo, ifsc, name",
+        error: "Missing required fields: withdrawId, amount, bankNo, ifsc, name",
       });
     }
 
+    logger.info("Payout:createPayoutHandler", "Initiating payout", { withdrawId, amount });
+
+    // Step 1: Call SilkPay payout API first
     const response = await payoutService.createPayoutOrder({
       amount,
       mOrderId,
@@ -39,9 +50,35 @@ const createPayoutHandler = async (req, res) => {
       notifyUrl,
     });
 
+    const usedMOrderId = response.usedMOrderId;
+    const payOrderId = response?.data?.payOrderId || null;
+
+    logger.info("Payout:createPayoutHandler", "SilkPay payout created successfully", { withdrawId, usedMOrderId, payOrderId });
+
+    // Step 2: Update withdrawl table with morder_id
+    try {
+      const [updateResult] = await db.execute(
+        "UPDATE withdrawl SET morder_id = ? WHERE id = ?",
+        [usedMOrderId, withdrawId]
+      );
+
+      if (updateResult.affectedRows === 0) {
+        logger.warn("Payout:createPayoutHandler", "DB UPDATE matched 0 rows — withdrawId may not exist", { withdrawId, usedMOrderId });
+      } else {
+        logger.info("Payout:createPayoutHandler", "DB updated — morder_id saved to withdrawl table", { withdrawId, usedMOrderId });
+      }
+    } catch (dbErr) {
+      logger.logError(
+        "Payout:createPayoutHandler",
+        `CRITICAL: Payout created at SilkPay but DB update failed — manual fix required | withdrawId=${withdrawId} | mOrderId=${usedMOrderId} | payOrderId=${payOrderId}`,
+        dbErr
+      );
+    }
+
     return res.json({
       success: true,
-      mOrderId: response.usedMOrderId,
+      mOrderId: usedMOrderId,
+      payOrderId,
       data: response,
     });
   } catch (error) {
