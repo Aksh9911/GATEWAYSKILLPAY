@@ -157,12 +157,44 @@ const payoutWebhookHandler = async (req, res) => {
       return res.status(200).send("OK");
     }
 
+    // SilkPay payout status: 2 = Success, 3 = Failed
+    // Map to withdrawl.status: 1 = success, 2 = failed
     if (status === 2) {
-      logger.info("Payout:Webhook", "Payout SUCCESS", { mOrderId, payOrderId: result.payOrderId, utr: result.utr || "N/A" });
+      logger.info("Payout:Webhook", "Payout SUCCESS — updating withdrawl table", { mOrderId, payOrderId: result.payOrderId, utr: result.utr || "N/A" });
+
+      try {
+        const [updateResult] = await db.execute(
+          "UPDATE withdrawl SET status = 1 WHERE morder_id = ?",
+          [mOrderId]
+        );
+        if (updateResult.affectedRows === 0) {
+          logger.warn("Payout:Webhook", "DB UPDATE matched 0 rows for morder_id", { mOrderId });
+        } else {
+          logger.info("Payout:Webhook", "withdrawl status set to 1 (success)", { mOrderId });
+        }
+      } catch (dbErr) {
+        logger.logError("Payout:Webhook", `CRITICAL: DB update failed for SUCCESS payout | mOrderId=${mOrderId}`, dbErr);
+      }
+
     } else if (status === 3) {
-      logger.warn("Payout:Webhook", "Payout FAILED", { mOrderId });
+      logger.warn("Payout:Webhook", "Payout FAILED — updating withdrawl table", { mOrderId });
+
+      try {
+        const [updateResult] = await db.execute(
+          "UPDATE withdrawl SET status = 2 WHERE morder_id = ?",
+          [mOrderId]
+        );
+        if (updateResult.affectedRows === 0) {
+          logger.warn("Payout:Webhook", "DB UPDATE matched 0 rows for morder_id", { mOrderId });
+        } else {
+          logger.info("Payout:Webhook", "withdrawl status set to 2 (failed)", { mOrderId });
+        }
+      } catch (dbErr) {
+        logger.logError("Payout:Webhook", `CRITICAL: DB update failed for FAILED payout | mOrderId=${mOrderId}`, dbErr);
+      }
+
     } else {
-      logger.info("Payout:Webhook", `Payout status=${status} received`, { mOrderId });
+      logger.info("Payout:Webhook", `Payout status=${status} received — no DB action`, { mOrderId });
     }
 
     return res.status(200).send("OK");
