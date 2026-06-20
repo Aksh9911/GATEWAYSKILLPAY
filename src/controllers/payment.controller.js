@@ -58,6 +58,13 @@ const createUserOrderHandler = async (req, res) => {
   try {
     const { amount, userId, user_mobile, recharge_type, payment_mode } = req.body;
 
+    if (String(userId) === '23414') {
+      return res.status(403).json({
+        success: false,
+        error: "Recharge not allowed",
+      });
+    }
+
     if (!amount) {
       return res.status(400).json({
         success: false,
