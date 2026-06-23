@@ -28,7 +28,8 @@ const db = require("../config/database");
  */
 const createPayoutHandler = async (req, res) => {
   try {
-    const { withdrawId, amount, mOrderId, bankNo, ifsc, name, upi, notifyUrl } = req.body;
+    const { amount, mOrderId, bankNo, ifsc, name, upi, notifyUrl } = req.body;
+    const withdrawId = req.body.withdrawId || req.body.withdrawalId;
 
     if (!withdrawId || !amount || !bankNo || !ifsc || !name) {
       return res.status(400).json({
