@@ -1,7 +1,6 @@
 const payoutService = require("../services/silkpay.payout.service");
 const logger = require("../utils/logger");
 const db = require("../config/database");
-const axios = require("axios");
 
 // ---------------------------------------------------------------------------
 // createPayoutHandler
@@ -179,72 +178,22 @@ const payoutWebhookHandler = async (req, res) => {
       }
 
     } else if (status === 3) {
-      logger.warn("Payout:Webhook", "Payout FAILED — refunding wallet + updating withdrawl", { mOrderId });
+      logger.warn("Payout:Webhook", "Payout FAILED — updating withdrawl (no auto-refund)", { mOrderId });
 
       try {
-        const [rows] = await db.execute(
-          "SELECT id, userId, balance, cryptoname, status, morder_id FROM withdrawl WHERE morder_id = ? LIMIT 1",
+        const [updateResult] = await db.execute(
+          "UPDATE withdrawl SET status = 2, rejected_by = 2 WHERE morder_id = ? AND status != 2",
           [mOrderId]
         );
-        const withdrawl = rows[0];
-
-        if (!withdrawl) {
-          logger.warn("Payout:Webhook", "FAILED but withdrawl not found", { mOrderId });
-        } else if (Number(withdrawl.status) === 2) {
-          logger.info("Payout:Webhook", "Already failed — skip refund", {
-            mOrderId,
-            withdrawId: withdrawl.id,
-          });
+        if (updateResult.affectedRows === 0) {
+          logger.warn("Payout:Webhook", "DB UPDATE matched 0 rows for morder_id (already failed or missing)", { mOrderId });
         } else {
-          const platformBaseURL = process.env.PLATFORM_BASE_URL || "https://api.rollix777.com";
-          const refundAmount = Number(withdrawl.balance);
-          const cryptoname = withdrawl.cryptoname || "INR";
-
-          logger.info("Payout:Webhook:RefundAPI", "Calling platform wallet refund", {
-            url: `${platformBaseURL}/api/user/wallet/balance`,
-            userId: withdrawl.userId,
-            amount: refundAmount,
-            cryptoname,
-            withdrawId: withdrawl.id,
-            mOrderId,
-          });
-
-          const walletRes = await axios.put(
-            `${platformBaseURL}/api/user/wallet/balance`,
-            {
-              userId: withdrawl.userId,
-              cryptoname,
-              balance: refundAmount,
-            },
-            { timeout: 15000, headers: { "Content-Type": "application/json" } }
-          );
-
-          logger.logResponse(
-            "Payout:Webhook:RefundAPI",
-            `${platformBaseURL}/api/user/wallet/balance`,
-            walletRes.data
-          );
-          logger.info("Payout:Webhook", "Wallet refunded after FAILED payout", {
-            mOrderId,
-            withdrawId: withdrawl.id,
-            userId: withdrawl.userId,
-            amount: refundAmount,
-          });
-
-          const [updateResult] = await db.execute(
-            "UPDATE withdrawl SET status = 2 WHERE morder_id = ? AND status != 2",
-            [mOrderId]
-          );
-          if (updateResult.affectedRows === 0) {
-            logger.warn("Payout:Webhook", "DB UPDATE matched 0 rows for morder_id after refund", { mOrderId });
-          } else {
-            logger.info("Payout:Webhook", "withdrawl status set to 2 (failed) after refund", { mOrderId });
-          }
+          logger.info("Payout:Webhook", "withdrawl status set to 2 (failed), rejected_by=2 — manual credit required", { mOrderId });
         }
       } catch (err) {
         logger.logError(
           "Payout:Webhook",
-          `CRITICAL: Payout FAILED but wallet refund/DB update failed | mOrderId=${mOrderId}`,
+          `CRITICAL: Payout FAILED but DB update failed | mOrderId=${mOrderId}`,
           err
         );
       }
