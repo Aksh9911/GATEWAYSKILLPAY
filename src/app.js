@@ -53,43 +53,27 @@ app.get("/health", (req, res) => {
   });
 });
 
-// Root endpoint
+// Root + docs — no public surface
 app.get("/", (req, res) => {
-  res.json({
-    message: "SilkPay Payment Gateway API",
-    version: "1.0.0",
-    endpoints: {
-      createPayment: "POST /api/payments/create",
-      queryPaymentStatus: "POST /api/payments/status",
-      submitUtr: "POST /api/payments/submit-utr",
-      queryUtr: "POST /api/payments/query-utr",
-      verifyPayment: "GET /api/payments/verify/:paymentId",
-      webhook: "POST /api/payment/webhook",
-      createPayout: "POST /api/payout/create",
-      payoutStatus: "POST /api/payout/status",
-      merchantBalance: "GET /api/payout/balance",
-      payoutWebhook: "POST /api/payout/webhook",
-      health: "GET /health",
-    },
-    silkpayEndpoints: {
-      payin_create: "POST https://api.silkpay.ai/transaction/payin/v2",
-      payin_query: "POST https://api.silkpay.ai/transaction/payin/query",
-      payin_submitUtr: "POST https://api.silkpay.ai/transaction/payin/submit/utr",
-      payin_queryUtr: "POST https://api.silkpay.ai/transaction/payin/query/utr",
-      payout_create: "POST https://api.silkpay.ai/transaction/payout",
-      payout_query: "POST https://api.silkpay.ai/transaction/payout/query",
-      balance: "POST https://api.silkpay.ai/transaction/balance",
-    },
-    documentation: "https://silkpay.stoplight.io/docs/silkpay/branches/main/30sk57lgvy7qx-guide",
-  });
+  res.status(404).type("text/plain").send("Page not existed");
+});
+
+app.all("/api/docs", (req, res) => {
+  res.status(404).type("text/plain").send("Page not existed");
+});
+app.all("/api/docs/*", (req, res) => {
+  res.status(404).type("text/plain").send("Page not existed");
+});
+app.all("/swagger", (req, res) => {
+  res.status(404).type("text/plain").send("Page not existed");
+});
+app.all("/docs", (req, res) => {
+  res.status(404).type("text/plain").send("Page not existed");
 });
 
 // 404 handler
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: "Route not found",
-  });
+  res.status(404).type("text/plain").send("Page not existed");
 });
 
 // Global error handler
